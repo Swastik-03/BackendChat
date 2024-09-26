@@ -6,7 +6,7 @@ const cors = require('cors');
 const app = express();
 
 app.use(cors({
-    origin: '*'
+    origin: '*' // Allow all origins for CORS
 }));
 app.use(express.json()); // Middleware to parse JSON bodies
 
@@ -17,7 +17,7 @@ const io = socketIo(server, {
     }
 });
 
-const users = {}; // To store user connections
+const users = {}; // To store user connections and their usernames
 
 io.on('connection', (socket) => {
     console.log("New user connected -->", socket.id);
@@ -26,37 +26,55 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log("User Disconnected -->", socket.id);
         // Optionally: Remove user from all rooms here if necessary
+        delete users[socket.id]; // Remove the user from the users object
     });
 
     // Handle incoming group messages
     socket.on('message', (data) => {
         const message = {
             senderId: socket.id,
+            senderName: data.senderName, // Include sender name
             content: data.content,
-            room: data.room // Assuming you include the room in the message data
+            room: data.room // Room the message is sent to
         };
         // Emit to all clients in the specific room
         io.to(data.room).emit('message', message); // Emit to the specified room
+    });
+
+    // Join room handler
+    socket.on('joinRoom', (data) => {
+        const { roomId, username } = data;
+
+        if (roomId && username) {
+            socket.join(roomId); // Join the specified room
+            users[socket.id] = username; // Store the username
+            console.log(`User ${username} (${socket.id}) joined room: ${roomId}`);
+            // Optionally notify other users in the room
+            socket.to(roomId).emit('message', {
+                senderId: 'System',
+                senderName: 'System',
+                content: `${username} has joined the room.`,
+                room: roomId
+            });
+        }
     });
 });
 
 // API endpoint to join a room
 app.post('/joinRoom', (req, res) => {
-    const { roomId } = req.body;
+    const { roomId, socketId, username } = req.body;
 
-    // Get the socket ID from the request body instead of req.socket
-    const socketId = req.body.socketId;
-
-    if (roomId && socketId) {
+    if (roomId && socketId && username) {
         const socket = io.sockets.sockets.get(socketId); // Get the socket instance
         if (socket) {
             socket.join(roomId); // Join the specified room
-            console.log(`User ${socketId} joined room: ${roomId}`);
+            users[socketId] = username; // Store the username
+            console.log(`User ${username} (${socketId}) joined room: ${roomId}`);
             return res.status(200).json({ message: `Joined room: ${roomId}` });
         }
     }
 
-    return res.status(400).json({ message: 'Invalid room ID or socket ID' });
+    return res.status(400).json({ message: 'Invalid room ID, socket ID, or username' });
 });
 
 const port = process.env.PORT || 4000;
